@@ -16,14 +16,17 @@ st.markdown("""
     .div-box { background-color: rgba(64, 192, 87, 0.1); padding: 8px; border-radius: 5px; margin-top: 10px; border-left: 3px solid #40c057;}
     .div-value { color: #40c057; font-size: 14px; font-weight: bold; }
     .div-yield { color: #aaa; font-size: 12px; }
+    .stMetric { background-color: #1e2124; padding: 15px; border-radius: 10px; border: 1px solid #333; }
     </style>
     """, unsafe_allow_html=True)
 
+# --- FUNÇÃO: TERMÔMETRO VISUAL COM ESPAÇAMENTO ---
 def termometro_52s(min_val, max_val, atual):
     pos = ((atual - min_val) / (max_val - min_val)) * 100 if max_val != min_val else 50
     pos = max(0, min(100, pos))
+    # Aumentei o margin-bottom para 20px para descolar do final do card
     return f"""
-    <div style="margin-top: 15px; margin-bottom: 5px; padding: 0 5px;">
+    <div style="margin-top: 15px; margin-bottom: 20px; padding: 0 5px;">
         <div style="display: flex; justify-content: space-between; font-size: 11px; color: #888; margin-bottom: 4px;">
             <span>Mín: R$ {min_val:.2f}</span>
             <span>Máx: R$ {max_val:.2f}</span>
@@ -47,10 +50,10 @@ descricoes = {
     "COIN11.SA": "Ecossistema Cripto e Blockchain.", "IWMI11.SA": "Small Caps (Russell 2000) + Opções.",
     "QQQQ11.SA": "Nasdaq High Beta (Alta Volatilidade).", "CASA11.SA": "REITs de qualidade (Imobiliário EUA).",
     "FIXX11.SA": "Caixa em Dólar (T-Bills 1-3 meses).", "RICO11.SA": "Copia Grandes Bilionários.",
-    "GBTC11.SA": "Ouro Físico + Bitcoin.", "AURO11.SA": "Ouro Físico + Renda Mensal.",
+    "GBTC11.SA": "Hashdex Gold + Bitcoin.", "AURO11.SA": "Ouro Físico + Renda Mensal.",
     "GDIV11.SA": "Ações globais sólidas e dividendos.", "ETHY11.SA": "Ethereum + Opções.",
-    "PIPE11.SA": "Infraestrutura de Energia (MLPs).", "XBCI11.SA": "Bitcoin Alavancado (Yield).",
-    "XSPI11.SA": "S&P 500 Alavancado. ⚠️ ALAVANCADO"
+    "PIPE11.SA": "Infraestrutura de Energia (MLPs).", "XBCI11.SA": "Boosted Bitcoin (Yield).",
+    "XSPI11.SA": "Boosted S&P 500. ⚠️ ALAVANCADO"
 }
 
 # --- REQUISIÇÃO ÚNICA DE DADOS ---
@@ -62,7 +65,7 @@ def fetch_everything_single_batch():
     except:
         return None
 
-with st.spinner("Conectando com a B3 em requisição única..."):
+with st.spinner("Sincronizando com a B3 em lote único..."):
     df_global = fetch_everything_single_batch()
 
 # 5. Sidebar
@@ -89,7 +92,7 @@ with st.sidebar:
 # 6. Dashboard Principal
 hora_br = (datetime.utcnow() - timedelta(hours=3)).strftime('%H:%M:%S')
 st.title("📈 Monitor Buena Vista ETFs")
-st.caption(f"Sincronizado BRT: {hora_br} | Requisição Única (Preços e Proventos)")
+st.caption(f"Sincronizado BRT: {hora_br} | ⚠️ Delay padrão de ~15min em relação à B3")
 
 if df_global is not None and not df_global.empty:
     for cat, ativos in tickers_dict.items():
@@ -109,7 +112,7 @@ if df_global is not None and not df_global.empty:
                             min_52 = float(d_ativo['Low'].min())
                             max_52 = float(d_ativo['High'].max())
                             
-                            # Filtra a coluna de dividendos para encontrar o último pagamento
+                            # Filtra a coluna de dividendos (actions=True do yf.download)
                             divs_pagos = d_ativo[d_ativo['Dividends'] > 0]['Dividends']
                             ultimo_div = float(divs_pagos.iloc[-1]) if not divs_pagos.empty else 0.0
                             yield_m = (ultimo_div / p_atual) * 100 if p_atual > 0 else 0.0
@@ -119,7 +122,7 @@ if df_global is not None and not df_global.empty:
                             
                             st.metric("Cotação", f"R$ {p_atual:.2f}", f"{var:.2f}%")
                             
-                            # Exibição de Dividendos
+                            # Proventos
                             if ultimo_div > 0:
                                 st.markdown(f"""
                                 <div class='div-box'>
@@ -130,15 +133,15 @@ if df_global is not None and not df_global.empty:
                             else:
                                 st.markdown("<div class='div-box'><span class='div-yield'>Sem proventos listados no ano.</span></div>", unsafe_allow_html=True)
                             
-                            # Termômetro limpo no final do card
+                            # Termômetro com o novo espaçamento
                             st.markdown(termometro_52s(min_52, max_52, p_atual), unsafe_allow_html=True)
                         else:
                             raise ValueError
                     except Exception as e:
                         st.markdown(f"<div class='ticker-name'>{t.replace('.SA','')}</div>", unsafe_allow_html=True)
-                        st.error("Sem dados no período.")
+                        st.error("Sem sinal da B3 no momento.")
 else:
-    st.error("⚠️ Yahoo Finance bloqueou a nuvem. Tente recarregar.")
+    st.error("⚠️ Yahoo Finance bloqueou a conexão. Aguarde alguns minutos.")
 
 # Auto-refresh
 if st.sidebar.toggle("🔄 Auto-Refresh (10 min)", value=False):
