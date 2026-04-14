@@ -32,6 +32,7 @@ st.markdown("""
         font-size: 11px;
         color: #888;
         margin-top: 5px;
+        font-weight: 600;
     }
     </style>
     """, unsafe_allow_html=True)
@@ -82,18 +83,20 @@ descricoes = {
     "XSPI11.SA": "S&P 500 Alavancado. <span class='alavancado-warning'>⚠️ ALTA VOLATILIDADE</span>"
 }
 
-# --- BUSCA EM LOTE ---
+# --- BUSCA DUPLA EM LOTE (A Mágica do Horário) ---
 @st.cache_data(ttl=600)
 def carregar_todos_os_dados(lista):
     try:
-        # Puxamos 1 ano para ter o histórico de 52 semanas
-        dados = yf.download(lista, period="1y", group_by='ticker', threads=True)
-        return dados
+        # 1. Base Diária Longa: Útil para Máxima, Mínima e Fechamento Anterior
+        df_1y = yf.download(lista, period="1y", group_by='ticker', threads=True)
+        # 2. Base Curta de Minutos: Útil para o Preço Atual exato e o Horário real da última negociação
+        df_1m = yf.download(lista, period="5d", interval="1m", group_by='ticker', threads=True)
+        return df_1y, df_1m
     except:
-        return None
+        return None, None
 
-with st.spinner('Sincronizando dados com a B3...'):
-    df_global = carregar_todos_os_dados(tickers_list)
+with st.spinner('Sincronizando pregão intradiário com a B3...'):
+    df_global_1y, df_global_1m = carregar_todos_os_dados(tickers_list)
 
 # 5. Sidebar - CALCULADORA DE REBALANCEAMENTO
 with st.sidebar:
@@ -101,7 +104,6 @@ with st.sidebar:
     aporte = st.number_input("💸 Novo Aporte (R$):", min_value=0.0, value=1000.0, step=100.0)
     
     st.markdown("**Minhas Cotas:**")
-    # Iniciando zerado para privacidade
     qtd_spyi = st.number_input("SPYI11", min_value=0, value=0)
     qtd_qqqi = st.number_input("QQQI11", min_value=0, value=0)
     qtd_ethy = st.number_input("ETHY11", min_value=0, value=0)
@@ -117,12 +119,13 @@ with st.sidebar:
     if st.button("Calcular Rebalanceamento", use_container_width=True):
         if (alvo_spyi + alvo_qqqi + alvo_ethy + alvo_coin) != 100:
             st.error("Soma dos alvos deve ser 100%.")
-        elif df_global is not None:
+        elif df_global_1m is not None:
             try:
-                p_spyi = float(df_global['SPYI11.SA']['Close'].dropna().iloc[-1])
-                p_qqqi = float(df_global['QQQI11.SA']['Close'].dropna().iloc[-1])
-                p_ethy = float(df_global['ETHY11.SA']['Close'].dropna().iloc[-1])
-                p_coin = float(df_global['COIN11.SA']['Close'].dropna().iloc[-1])
+                # Agora a calculadora usa o preço de MINUTO para máxima precisão de compra
+                p_spyi = float(df_global_1m['SPYI11.SA']['Close'].dropna().iloc[-1])
+                p_qqqi = float(df_global_1m['QQQI11.SA']['Close'].dropna().iloc[-1])
+                p_ethy = float(df_global_1m['ETHY11.SA']['Close'].dropna().iloc[-1])
+                p_coin = float(df_global_1m['COIN11.SA']['Close'].dropna().iloc[-1])
                 
                 v_atuais = {
                     'SPYI11': qtd_spyi * p_spyi, 'QQQI11': qtd_qqqi * p_qqqi,
@@ -152,9 +155,9 @@ with st.sidebar:
 
 # 6. Painel Principal
 st.title("📈 Monitor Buena Vista ETFs")
-st.caption(f"Dados consolidados via Yahoo Finance | {datetime.now().strftime('%H:%M:%S')}")
+st.caption(f"Dados consolidados via Yahoo Finance | Atualizado às {datetime.now().strftime('%H:%M:%S')}")
 
-if df_global is not None and not df_global.empty:
+if df_global_1y is not None and df_global_1m is not None:
     categorias = [
         ("🎯 Renda & Índices Acionários", ["SPYI11.SA", "QQQI11.SA", "IWMI11.SA", "GDIV11.SA", "QQQQ11.SA", "XSPI11.SA"]),
         ("🌐 Cripto & Ativos Digitais", ["COIN11.SA", "ETHY11.SA", "XBCI11.SA", "GBTC11.SA"]),
@@ -168,16 +171,25 @@ if df_global is not None and not df_global.empty:
             for idx, ticker in enumerate(ativos[i:i+3]):
                 with cols[idx]:
                     try:
-                        df_ativo = df_global[ticker].dropna(subset=['Close'])
-                        if not df_ativo.empty:
-                            preco_atual = float(df_ativo['Close'].iloc[-1])
-                            preco_ant = float(df_ativo['Close'].iloc[-2]) if len(df_ativo) > 1 else preco_atual
+                        # Extrai dados garantindo que não estamos pegando dias/minutos vazios
+                        df_ativo_1y = df_global_1y[ticker].dropna(subset=['Close'])
+                        df_ativo_1m = df_global_1m[ticker].dropna(subset=['Close'])
+                        
+                        if not df_ativo_1y.empty and not df_ativo_1m.empty:
+                            # Preço atual vem do intradia (minuto)
+                            preco_atual = float(df_ativo_1m['Close'].iloc[-1])
+                            
+                            # Preço anterior vem do fechamento do dia anterior
+                            preco_ant = float(df_ativo_1y['Close'].iloc[-2]) if len(df_ativo_1y) > 1 else preco_atual
                             var = ((preco_atual - preco_ant) / preco_ant) * 100
                             
-                            # CÁLCULO DE HORÁRIO E HISTÓRICO
-                            horario_negoc = df_ativo.index[-1].strftime("%d/%m %H:%M")
-                            min_52s = float(df_ativo['Low'].min())
-                            max_52s = float(df_ativo['High'].max())
+                            # HORÁRIO: Pegando do index intradia de 1 minuto
+                            horario_negoc = df_ativo_1m.index[-1].strftime("%d/%m às %H:%M")
+                            
+                            # Histórico Longo: Pegando do index diário
+                            min_52s = float(df_ativo_1y['Low'].min())
+                            max_52s = float(df_ativo_1y['High'].max())
+                            volume_diario = float(df_ativo_1y['Volume'].iloc[-1])
                             
                             with st.container(border=True):
                                 st.markdown(f"<div class='ticker-name'>{ticker.replace('.SA', '')}</div>", unsafe_allow_html=True)
@@ -185,20 +197,19 @@ if df_global is not None and not df_global.empty:
                                 
                                 st.metric("Cotação", f"R$ {preco_atual:.2f}", f"{var:.2f}%")
                                 
-                                # Termômetro Visual
                                 st.markdown(termometro_52s(min_52s, max_52s, preco_atual), unsafe_allow_html=True)
                                 
-                                # TIMESTAMP DA ÚLTIMA NEGOCIAÇÃO
-                                st.markdown(f"<div class='time-stamp'>🕒 Última Negociação: {horario_negoc}</div>", unsafe_allow_html=True)
+                                # Timestamp agora exibe a hora exata da última negociação
+                                st.markdown(f"<div class='time-stamp'>🕒 Último negócio: {horario_negoc}</div>", unsafe_allow_html=True)
                         else:
                             raise ValueError
                     except:
                         with st.container(border=True):
                             st.markdown(f"<div class='ticker-name'>{ticker.replace('.SA', '')}</div>", unsafe_allow_html=True)
                             st.markdown(f"<div class='strategy-box'>{descricoes[ticker]}</div>", unsafe_allow_html=True)
-                            st.caption("Aguardando pregão...")
+                            st.caption("Aguardando registro de negociação...")
 else:
-    st.error("Conexão instável. Tente atualizar em alguns minutos.")
+    st.error("Conexão instável com a B3/Yahoo. Tente atualizar em alguns minutos.")
 
 if auto_refresh:
     time.sleep(600)
