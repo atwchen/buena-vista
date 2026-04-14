@@ -2,7 +2,7 @@ import streamlit as st
 import yfinance as yf
 import pandas as pd
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 
 # 1. Configuração da página
 st.set_page_config(page_title="Buena Vista | Dash", layout="wide", page_icon="📈")
@@ -83,13 +83,11 @@ descricoes = {
     "XSPI11.SA": "S&P 500 Alavancado. <span class='alavancado-warning'>⚠️ ALTA VOLATILIDADE</span>"
 }
 
-# --- BUSCA DUPLA EM LOTE (A Mágica do Horário) ---
+# --- BUSCA DUPLA EM LOTE ---
 @st.cache_data(ttl=600)
 def carregar_todos_os_dados(lista):
     try:
-        # 1. Base Diária Longa: Útil para Máxima, Mínima e Fechamento Anterior
         df_1y = yf.download(lista, period="1y", group_by='ticker', threads=True)
-        # 2. Base Curta de Minutos: Útil para o Preço Atual exato e o Horário real da última negociação
         df_1m = yf.download(lista, period="5d", interval="1m", group_by='ticker', threads=True)
         return df_1y, df_1m
     except:
@@ -121,7 +119,6 @@ with st.sidebar:
             st.error("Soma dos alvos deve ser 100%.")
         elif df_global_1m is not None:
             try:
-                # Agora a calculadora usa o preço de MINUTO para máxima precisão de compra
                 p_spyi = float(df_global_1m['SPYI11.SA']['Close'].dropna().iloc[-1])
                 p_qqqi = float(df_global_1m['QQQI11.SA']['Close'].dropna().iloc[-1])
                 p_ethy = float(df_global_1m['ETHY11.SA']['Close'].dropna().iloc[-1])
@@ -155,7 +152,10 @@ with st.sidebar:
 
 # 6. Painel Principal
 st.title("📈 Monitor Buena Vista ETFs")
-st.caption(f"Dados consolidados via Yahoo Finance | Atualizado às {datetime.now().strftime('%H:%M:%S')}")
+
+# Cálculo robusto do horário de Brasília (UTC-3)
+hora_brasilia = (datetime.utcnow() - timedelta(hours=3)).strftime('%H:%M:%S')
+st.caption(f"Dados consolidados via Yahoo Finance | Servidor Sincronizado às {hora_brasilia} (BRT)")
 
 if df_global_1y is not None and df_global_1m is not None:
     categorias = [
@@ -171,35 +171,27 @@ if df_global_1y is not None and df_global_1m is not None:
             for idx, ticker in enumerate(ativos[i:i+3]):
                 with cols[idx]:
                     try:
-                        # Extrai dados garantindo que não estamos pegando dias/minutos vazios
                         df_ativo_1y = df_global_1y[ticker].dropna(subset=['Close'])
                         df_ativo_1m = df_global_1m[ticker].dropna(subset=['Close'])
                         
                         if not df_ativo_1y.empty and not df_ativo_1m.empty:
-                            # Preço atual vem do intradia (minuto)
                             preco_atual = float(df_ativo_1m['Close'].iloc[-1])
-                            
-                            # Preço anterior vem do fechamento do dia anterior
                             preco_ant = float(df_ativo_1y['Close'].iloc[-2]) if len(df_ativo_1y) > 1 else preco_atual
                             var = ((preco_atual - preco_ant) / preco_ant) * 100
                             
-                            # HORÁRIO: Pegando do index intradia de 1 minuto
+                            # O yfinance já costuma trazer o index com o fuso da bolsa local (B3 = SP), 
+                            # então formatar direto o index intradiário funciona perfeitamente.
                             horario_negoc = df_ativo_1m.index[-1].strftime("%d/%m às %H:%M")
                             
-                            # Histórico Longo: Pegando do index diário
                             min_52s = float(df_ativo_1y['Low'].min())
                             max_52s = float(df_ativo_1y['High'].max())
-                            volume_diario = float(df_ativo_1y['Volume'].iloc[-1])
                             
                             with st.container(border=True):
                                 st.markdown(f"<div class='ticker-name'>{ticker.replace('.SA', '')}</div>", unsafe_allow_html=True)
                                 st.markdown(f"<div class='strategy-box'>{descricoes[ticker]}</div>", unsafe_allow_html=True)
                                 
                                 st.metric("Cotação", f"R$ {preco_atual:.2f}", f"{var:.2f}%")
-                                
                                 st.markdown(termometro_52s(min_52s, max_52s, preco_atual), unsafe_allow_html=True)
-                                
-                                # Timestamp agora exibe a hora exata da última negociação
                                 st.markdown(f"<div class='time-stamp'>🕒 Último negócio: {horario_negoc}</div>", unsafe_allow_html=True)
                         else:
                             raise ValueError
