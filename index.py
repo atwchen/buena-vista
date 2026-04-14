@@ -2,24 +2,10 @@ import streamlit as st
 import yfinance as yf
 import pandas as pd
 import time
-import requests
-import random
 from datetime import datetime, timedelta
 
 # 1. Configuração da página
 st.set_page_config(page_title="Buena Vista | Dash", layout="wide", page_icon="📈")
-
-# --- LISTA DE USER-AGENTS ---
-USER_AGENTS = [
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36'
-]
-
-@st.cache_resource
-def get_session():
-    session = requests.Session()
-    session.headers.update({'User-Agent': random.choice(USER_AGENTS)})
-    return session
 
 # 2. Estilização
 st.markdown("""
@@ -30,7 +16,7 @@ st.markdown("""
     .div-box { background-color: rgba(64, 192, 87, 0.1); padding: 8px; border-radius: 5px; margin-top: 10px; border-left: 3px solid #40c057;}
     .div-value { color: #40c057; font-size: 14px; font-weight: bold; }
     .div-yield { color: #aaa; font-size: 12px; }
-    .stMetric { background-color: #1e2124; padding: 15px; border-radius: 10px; border: 1px solid #333; }
+    .time-stamp { font-size: 11px; color: #888; margin-top: 10px; font-weight: bold; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -68,34 +54,20 @@ descricoes = {
     "XSPI11.SA": "S&P 500 Alavancado. ⚠️ ALAVANCADO"
 }
 
-# --- BUSCA DE PREÇOS (Lote Rápido, cache de 10 min) ---
+# --- A MÁGICA DA REQUISIÇÃO ÚNICA (actions=True traz os dividendos junto) ---
 @st.cache_data(ttl=600)
-def fetch_prices_batch():
+def fetch_everything_single_batch():
     try:
-        sess = get_session()
-        return yf.download(all_tickers, period="1y", group_by='ticker', session=sess, threads=True)
+        # Apenas 1 chamada. Extrai preços, volumes e dividendos (actions).
+        df = yf.download(all_tickers, period="1y", actions=True, group_by='ticker', threads=True)
+        return df
     except:
         return None
 
-# --- BUSCA DE DIVIDENDOS (Lenta, mas com cache de 24 horas para não bloquear) ---
-@st.cache_data(ttl=86400)
-def fetch_dividends_cache():
-    sess = get_session()
-    divs_dict = {}
-    for t in all_tickers:
-        try:
-            tk = yf.Ticker(t, session=sess)
-            d = tk.dividends
-            divs_dict[t] = float(d.iloc[-1]) if not d.empty else 0.0
-        except:
-            divs_dict[t] = 0.0
-    return divs_dict
+with st.spinner("Conectando com a B3 em requisição única..."):
+    df_global = fetch_everything_single_batch()
 
-with st.spinner("Sincronizando cotações e dividendos..."):
-    df_global = fetch_prices_batch()
-    dict_divs = fetch_dividends_cache()
-
-# 5. Sidebar - Calculadora
+# 5. Sidebar
 with st.sidebar:
     st.header("⚖️ Calculadora")
     aporte = st.number_input("Aporte (R$):", min_value=0.0, value=1000.0)
@@ -119,9 +91,7 @@ with st.sidebar:
 # 6. Dashboard Principal
 hora_br = (datetime.utcnow() - timedelta(hours=3)).strftime('%H:%M:%S')
 st.title("📈 Monitor Buena Vista ETFs")
-
-# Aviso claro sobre o delay de 15 minutos
-st.caption(f"Sincronizado BRT: {hora_br} | ⚠️ As cotações possuem delay padrão de ~15 minutos em relação à B3.")
+st.caption(f"Sincronizado BRT: {hora_br} | Requisição Única (Preços e Proventos)")
 
 if df_global is not None and not df_global.empty:
     for cat, ativos in tickers_dict.items():
@@ -131,6 +101,7 @@ if df_global is not None and not df_global.empty:
             with cols[idx % 3]:
                 with st.container(border=True):
                     try:
+                        # Seleciona o Ticker e remove dias vazios
                         d_ativo = df_global[t].dropna(subset=['Close'])
                         
                         if not d_ativo.empty:
@@ -138,10 +109,14 @@ if df_global is not None and not df_global.empty:
                             p_ant = float(d_ativo['Close'].iloc[-2]) if len(d_ativo) > 1 else p_atual
                             var = ((p_atual - p_ant) / p_ant) * 100
                             
-                            min_52, max_52 = float(d_ativo['Low'].min()), float(d_ativo['High'].max())
+                            min_52 = float(d_ativo['Low'].min())
+                            max_52 = float(d_ativo['High'].max())
                             
-                            # Matemática do Yield Mensal
-                            ultimo_div = dict_divs.get(t, 0.0)
+                            data_ref = d_ativo.index[-1].strftime("%d/%m/%Y")
+                            
+                            # Filtra a coluna de dividendos para encontrar o último pagamento > 0
+                            divs_pagos = d_ativo[d_ativo['Dividends'] > 0]['Dividends']
+                            ultimo_div = float(divs_pagos.iloc[-1]) if not divs_pagos.empty else 0.0
                             yield_m = (ultimo_div / p_atual) * 100 if p_atual > 0 else 0.0
                             
                             st.markdown(f"<div class='ticker-name'>{t.replace('.SA','')}</div>", unsafe_allow_html=True)
@@ -149,25 +124,26 @@ if df_global is not None and not df_global.empty:
                             
                             st.metric("Cotação", f"R$ {p_atual:.2f}", f"{var:.2f}%")
                             
-                            # Bloco de Dividendos
+                            # Exibição de Dividendos
                             if ultimo_div > 0:
                                 st.markdown(f"""
                                 <div class='div-box'>
-                                    <span class='div-value'>💰 Provento: R$ {ultimo_div:.2f}</span><br>
+                                    <span class='div-value'>💰 R$ {ultimo_div:.2f}</span><br>
                                     <span class='div-yield'>Yield Mensal: {yield_m:.2f}%</span>
                                 </div>
                                 """, unsafe_allow_html=True)
                             else:
-                                st.markdown("<div class='div-box'><span class='div-yield'>Sem proventos recentes.</span></div>", unsafe_allow_html=True)
+                                st.markdown("<div class='div-box'><span class='div-yield'>Sem proventos listados no ano.</span></div>", unsafe_allow_html=True)
                             
                             st.markdown(termometro_52s(min_52, max_52, p_atual), unsafe_allow_html=True)
+                            st.markdown(f"<div class='time-stamp'>📅 Base de Preço: {data_ref}</div>", unsafe_allow_html=True)
                         else:
                             raise ValueError
-                    except:
+                    except Exception as e:
                         st.markdown(f"<div class='ticker-name'>{t.replace('.SA','')}</div>", unsafe_allow_html=True)
-                        st.error("Aguardando histórico...")
+                        st.error("Sem dados no período.")
 else:
-    st.warning("⚠️ O Yahoo Finance recusou a conexão temporariamente. Tente novamente em alguns minutos.")
+    st.error("⚠️ Yahoo Finance bloqueou a nuvem. Tente recarregar.")
 
 # Auto-refresh
 if st.sidebar.toggle("🔄 Auto-Refresh (10 min)", value=False):
