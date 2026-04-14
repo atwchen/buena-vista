@@ -2,23 +2,38 @@ import streamlit as st
 import yfinance as yf
 import pandas as pd
 import time
+import requests
+import random
 from datetime import datetime, timedelta
 
 # 1. Configuração da página
 st.set_page_config(page_title="Buena Vista | Dash", layout="wide", page_icon="📈")
 
+# --- LISTA DE USER-AGENTS ---
+USER_AGENTS = [
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36'
+]
+
+@st.cache_resource
+def get_session():
+    session = requests.Session()
+    session.headers.update({'User-Agent': random.choice(USER_AGENTS)})
+    return session
+
 # 2. Estilização
 st.markdown("""
     <style>
     .section-title { font-size: 24px; font-weight: 800; color: #ffffff; background-color: #1E88E5; padding: 10px 20px; border-radius: 10px; margin-top: 20px; margin-bottom: 15px; }
-    .ticker-name { font-size: 26px !important; font-weight: 900; color: #4dabf7; }
+    .ticker-name { font-size: 26px !important; font-weight: 900; color: #4dabf7; margin-bottom: 5px;}
     .strategy-box { font-size: 13px !important; color: #e9ecef !important; background-color: #2b2f33; padding: 10px; border-radius: 8px; border-left: 5px solid #4dabf7; margin-bottom: 10px; min-height: 70px; }
-    .time-stamp { font-size: 11px; color: #888; margin-top: 5px; font-weight: 600; }
+    .div-box { background-color: rgba(64, 192, 87, 0.1); padding: 8px; border-radius: 5px; margin-top: 10px; border-left: 3px solid #40c057;}
+    .div-value { color: #40c057; font-size: 14px; font-weight: bold; }
+    .div-yield { color: #aaa; font-size: 12px; }
     .stMetric { background-color: #1e2124; padding: 15px; border-radius: 10px; border: 1px solid #333; }
     </style>
     """, unsafe_allow_html=True)
 
-# --- FUNÇÃO: TERMÔMETRO VISUAL ---
 def termometro_52s(min_val, max_val, atual):
     pos = ((atual - min_val) / (max_val - min_val)) * 100 if max_val != min_val else 50
     pos = max(0, min(100, pos))
@@ -53,19 +68,34 @@ descricoes = {
     "XSPI11.SA": "S&P 500 Alavancado. ⚠️ ALAVANCADO"
 }
 
-# --- O RETORNO DO BATCH ESTÁVEL ---
+# --- BUSCA DE PREÇOS (Lote Rápido, cache de 10 min) ---
 @st.cache_data(ttl=600)
-def fetch_data_batch():
+def fetch_prices_batch():
     try:
-        # Apenas UMA chamada leve e diária. É isso que passa liso no Yahoo.
-        return yf.download(all_tickers, period="1y", group_by='ticker', threads=True)
+        sess = get_session()
+        return yf.download(all_tickers, period="1y", group_by='ticker', session=sess, threads=True)
     except:
         return None
 
-with st.spinner("Sincronizando com a B3 em lote..."):
-    df_global = fetch_data_batch()
+# --- BUSCA DE DIVIDENDOS (Lenta, mas com cache de 24 horas para não bloquear) ---
+@st.cache_data(ttl=86400)
+def fetch_dividends_cache():
+    sess = get_session()
+    divs_dict = {}
+    for t in all_tickers:
+        try:
+            tk = yf.Ticker(t, session=sess)
+            d = tk.dividends
+            divs_dict[t] = float(d.iloc[-1]) if not d.empty else 0.0
+        except:
+            divs_dict[t] = 0.0
+    return divs_dict
 
-# 5. Sidebar - Calculadora de Rebalanceamento
+with st.spinner("Sincronizando cotações e dividendos..."):
+    df_global = fetch_prices_batch()
+    dict_divs = fetch_dividends_cache()
+
+# 5. Sidebar - Calculadora
 with st.sidebar:
     st.header("⚖️ Calculadora")
     aporte = st.number_input("Aporte (R$):", min_value=0.0, value=1000.0)
@@ -89,7 +119,9 @@ with st.sidebar:
 # 6. Dashboard Principal
 hora_br = (datetime.utcnow() - timedelta(hours=3)).strftime('%H:%M:%S')
 st.title("📈 Monitor Buena Vista ETFs")
-st.caption(f"Sincronizado BRT: {hora_br}")
+
+# Aviso claro sobre o delay de 15 minutos
+st.caption(f"Sincronizado BRT: {hora_br} | ⚠️ As cotações possuem delay padrão de ~15 minutos em relação à B3.")
 
 if df_global is not None and not df_global.empty:
     for cat, ativos in tickers_dict.items():
@@ -99,7 +131,6 @@ if df_global is not None and not df_global.empty:
             with cols[idx % 3]:
                 with st.container(border=True):
                     try:
-                        # Limpa dias sem pregão
                         d_ativo = df_global[t].dropna(subset=['Close'])
                         
                         if not d_ativo.empty:
@@ -109,16 +140,27 @@ if df_global is not None and not df_global.empty:
                             
                             min_52, max_52 = float(d_ativo['Low'].min()), float(d_ativo['High'].max())
                             
-                            # A SACADA: Formata para exibir APENAS A DATA, removendo o 00:00 chato
-                            data_pregao = d_ativo.index[-1].strftime("%d/%m/%Y")
+                            # Matemática do Yield Mensal
+                            ultimo_div = dict_divs.get(t, 0.0)
+                            yield_m = (ultimo_div / p_atual) * 100 if p_atual > 0 else 0.0
                             
                             st.markdown(f"<div class='ticker-name'>{t.replace('.SA','')}</div>", unsafe_allow_html=True)
                             st.markdown(f"<div class='strategy-box'>{descricoes[t]}</div>", unsafe_allow_html=True)
-                            st.metric("Cotação", f"R$ {p_atual:.2f}", f"{var:.2f}%")
-                            st.markdown(termometro_52s(min_52, max_52, p_atual), unsafe_allow_html=True)
                             
-                            # Exibe "Último fechamento" em vez de tentar inventar a hora
-                            st.markdown(f"<div class='time-stamp'>📅 Último fechamento: {data_pregao}</div>", unsafe_allow_html=True)
+                            st.metric("Cotação", f"R$ {p_atual:.2f}", f"{var:.2f}%")
+                            
+                            # Bloco de Dividendos
+                            if ultimo_div > 0:
+                                st.markdown(f"""
+                                <div class='div-box'>
+                                    <span class='div-value'>💰 Provento: R$ {ultimo_div:.2f}</span><br>
+                                    <span class='div-yield'>Yield Mensal: {yield_m:.2f}%</span>
+                                </div>
+                                """, unsafe_allow_html=True)
+                            else:
+                                st.markdown("<div class='div-box'><span class='div-yield'>Sem proventos recentes.</span></div>", unsafe_allow_html=True)
+                            
+                            st.markdown(termometro_52s(min_52, max_52, p_atual), unsafe_allow_html=True)
                         else:
                             raise ValueError
                     except:
