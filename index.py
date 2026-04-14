@@ -16,7 +16,6 @@ st.markdown("""
     .div-box { background-color: rgba(64, 192, 87, 0.1); padding: 8px; border-radius: 5px; margin-top: 10px; border-left: 3px solid #40c057;}
     .div-value { color: #40c057; font-size: 14px; font-weight: bold; }
     .div-yield { color: #aaa; font-size: 12px; }
-    .time-stamp { font-size: 11px; color: #888; margin-top: 10px; font-weight: bold; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -54,11 +53,10 @@ descricoes = {
     "XSPI11.SA": "S&P 500 Alavancado. ⚠️ ALAVANCADO"
 }
 
-# --- A MÁGICA DA REQUISIÇÃO ÚNICA (actions=True traz os dividendos junto) ---
+# --- REQUISIÇÃO ÚNICA DE DADOS ---
 @st.cache_data(ttl=600)
 def fetch_everything_single_batch():
     try:
-        # Apenas 1 chamada. Extrai preços, volumes e dividendos (actions).
         df = yf.download(all_tickers, period="1y", actions=True, group_by='ticker', threads=True)
         return df
     except:
@@ -101,7 +99,6 @@ if df_global is not None and not df_global.empty:
             with cols[idx % 3]:
                 with st.container(border=True):
                     try:
-                        # Seleciona o Ticker e remove dias vazios
                         d_ativo = df_global[t].dropna(subset=['Close'])
                         
                         if not d_ativo.empty:
@@ -112,9 +109,7 @@ if df_global is not None and not df_global.empty:
                             min_52 = float(d_ativo['Low'].min())
                             max_52 = float(d_ativo['High'].max())
                             
-                            data_ref = d_ativo.index[-1].strftime("%d/%m/%Y")
-                            
-                            # Filtra a coluna de dividendos para encontrar o último pagamento > 0
+                            # Filtra a coluna de dividendos para encontrar o último pagamento
                             divs_pagos = d_ativo[d_ativo['Dividends'] > 0]['Dividends']
                             ultimo_div = float(divs_pagos.iloc[-1]) if not divs_pagos.empty else 0.0
                             yield_m = (ultimo_div / p_atual) * 100 if p_atual > 0 else 0.0
@@ -135,8 +130,8 @@ if df_global is not None and not df_global.empty:
                             else:
                                 st.markdown("<div class='div-box'><span class='div-yield'>Sem proventos listados no ano.</span></div>", unsafe_allow_html=True)
                             
+                            # Termômetro limpo no final do card
                             st.markdown(termometro_52s(min_52, max_52, p_atual), unsafe_allow_html=True)
-                            st.markdown(f"<div class='time-stamp'>📅 Base de Preço: {data_ref}</div>", unsafe_allow_html=True)
                         else:
                             raise ValueError
                     except Exception as e:
