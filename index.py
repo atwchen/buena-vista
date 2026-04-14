@@ -2,26 +2,10 @@ import streamlit as st
 import yfinance as yf
 import pandas as pd
 import time
-import requests
-import random
 from datetime import datetime, timedelta
 
 # 1. Configuração da página
 st.set_page_config(page_title="Buena Vista | Dash", layout="wide", page_icon="📈")
-
-# --- LISTA DE USER-AGENTS PARA EVITAR BLOQUEIO ---
-USER_AGENTS = [
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
-    'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Safari/537.36',
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/115.0'
-]
-
-@st.cache_resource
-def get_session():
-    session = requests.Session()
-    session.headers.update({'User-Agent': random.choice(USER_AGENTS)})
-    return session
 
 # 2. Estilização
 st.markdown("""
@@ -34,6 +18,7 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
+# --- FUNÇÃO: TERMÔMETRO VISUAL ---
 def termometro_52s(min_val, max_val, atual):
     pos = ((atual - min_val) / (max_val - min_val)) * 100 if max_val != min_val else 50
     pos = max(0, min(100, pos))
@@ -65,25 +50,22 @@ descricoes = {
     "GBTC11.SA": "Ouro Físico + Bitcoin.", "AURO11.SA": "Ouro Físico + Renda Mensal.",
     "GDIV11.SA": "Ações globais sólidas e dividendos.", "ETHY11.SA": "Ethereum + Opções.",
     "PIPE11.SA": "Infraestrutura de Energia (MLPs).", "XBCI11.SA": "Bitcoin Alavancado (Yield).",
-    "XSPI11.SA": "S&P 500 Alavancado. ⚠️"
+    "XSPI11.SA": "S&P 500 Alavancado. ⚠️ ALAVANCADO"
 }
 
-# 4. Busca de Dados
+# --- O RETORNO DO BATCH ESTÁVEL ---
 @st.cache_data(ttl=600)
-def fetch_data():
-    sess = get_session()
-    # Puxa 1 ano para as métricas térmicas
+def fetch_data_batch():
     try:
-        data_1y = yf.download(all_tickers, period="1y", group_by='ticker', session=sess, threads=True)
-        # Puxa 5 dias com intervalo de 1m para o preço real e hora
-        data_1m = yf.download(all_tickers, period="5d", interval="1m", group_by='ticker', session=sess, threads=True)
-        return data_1y, data_1m
+        # Apenas UMA chamada leve e diária. É isso que passa liso no Yahoo.
+        return yf.download(all_tickers, period="1y", group_by='ticker', threads=True)
     except:
-        return None, None
+        return None
 
-df_1y, df_1m = fetch_data()
+with st.spinner("Sincronizando com a B3 em lote..."):
+    df_global = fetch_data_batch()
 
-# 5. Sidebar
+# 5. Sidebar - Calculadora de Rebalanceamento
 with st.sidebar:
     st.header("⚖️ Calculadora")
     aporte = st.number_input("Aporte (R$):", min_value=0.0, value=1000.0)
@@ -93,16 +75,23 @@ with st.sidebar:
     q_ethy = st.number_input("ETHY11", 0)
     q_coin = st.number_input("COIN11", 0)
     
+    st.markdown("**Alvos (%):**")
+    col1, col2 = st.columns(2)
+    a_spyi = col1.number_input("% SPYI", 50)
+    a_qqqi = col2.number_input("% QQQI", 30)
+    a_ethy = col1.number_input("% ETHY", 10)
+    a_coin = col2.number_input("% COIN", 10)
+    
     if st.button("🚀 Forçar Atualização"):
         st.cache_data.clear()
         st.rerun()
 
-# 6. Dashboard
+# 6. Dashboard Principal
 hora_br = (datetime.utcnow() - timedelta(hours=3)).strftime('%H:%M:%S')
 st.title("📈 Monitor Buena Vista ETFs")
 st.caption(f"Sincronizado BRT: {hora_br}")
 
-if df_1y is not None and not df_1y.empty:
+if df_global is not None and not df_global.empty:
     for cat, ativos in tickers_dict.items():
         st.markdown(f"<div class='section-title'>{cat}</div>", unsafe_allow_html=True)
         cols = st.columns(3)
@@ -110,31 +99,35 @@ if df_1y is not None and not df_1y.empty:
             with cols[idx % 3]:
                 with st.container(border=True):
                     try:
-                        # Extração segura
-                        d_long = df_1y[t].dropna()
-                        d_short = df_1m[t].dropna() if df_1m is not None else d_long
+                        # Limpa dias sem pregão
+                        d_ativo = df_global[t].dropna(subset=['Close'])
                         
-                        p_atual = float(d_short['Close'].iloc[-1])
-                        p_ant = float(d_long['Close'].iloc[-2])
-                        var = ((p_atual - p_ant) / p_ant) * 100
-                        
-                        min_52, max_52 = float(d_long['Low'].min()), float(d_long['High'].max())
-                        # Ajuste do Horário (Yahoo traz UTC ou Local da Bolsa)
-                        # O index do 1m já costuma vir com o fuso correto
-                        hora_txt = d_short.index[-1].strftime("%d/%m %H:%M")
-                        
-                        st.markdown(f"<div class='ticker-name'>{t.replace('.SA','')}</div>", unsafe_allow_html=True)
-                        st.markdown(f"<div class='strategy-box'>{descricoes[t]}</div>", unsafe_allow_html=True)
-                        st.metric("Cotação", f"R$ {p_atual:.2f}", f"{var:.2f}%")
-                        st.markdown(termometro_52s(min_52, max_52, p_atual), unsafe_allow_html=True)
-                        st.markdown(f"<div class='time-stamp'>🕒 Último negócio: {hora_txt}</div>", unsafe_allow_html=True)
+                        if not d_ativo.empty:
+                            p_atual = float(d_ativo['Close'].iloc[-1])
+                            p_ant = float(d_ativo['Close'].iloc[-2]) if len(d_ativo) > 1 else p_atual
+                            var = ((p_atual - p_ant) / p_ant) * 100
+                            
+                            min_52, max_52 = float(d_ativo['Low'].min()), float(d_ativo['High'].max())
+                            
+                            # A SACADA: Formata para exibir APENAS A DATA, removendo o 00:00 chato
+                            data_pregao = d_ativo.index[-1].strftime("%d/%m/%Y")
+                            
+                            st.markdown(f"<div class='ticker-name'>{t.replace('.SA','')}</div>", unsafe_allow_html=True)
+                            st.markdown(f"<div class='strategy-box'>{descricoes[t]}</div>", unsafe_allow_html=True)
+                            st.metric("Cotação", f"R$ {p_atual:.2f}", f"{var:.2f}%")
+                            st.markdown(termometro_52s(min_52, max_52, p_atual), unsafe_allow_html=True)
+                            
+                            # Exibe "Último fechamento" em vez de tentar inventar a hora
+                            st.markdown(f"<div class='time-stamp'>📅 Último fechamento: {data_pregao}</div>", unsafe_allow_html=True)
+                        else:
+                            raise ValueError
                     except:
                         st.markdown(f"<div class='ticker-name'>{t.replace('.SA','')}</div>", unsafe_allow_html=True)
-                        st.error("Sem sinal da B3 no momento.")
+                        st.error("Aguardando histórico...")
 else:
-    st.warning("⚠️ Erro de conexão com o Yahoo Finance. O servidor deles pode estar recusando requisições da nuvem agora. Tente novamente em 5 minutos.")
+    st.warning("⚠️ O Yahoo Finance recusou a conexão temporariamente. Tente novamente em alguns minutos.")
 
-# Auto-refresh a cada 10 min
-if st.sidebar.toggle("🔄 Auto-Refresh", value=False):
+# Auto-refresh
+if st.sidebar.toggle("🔄 Auto-Refresh (10 min)", value=False):
     time.sleep(600)
     st.rerun()
