@@ -7,25 +7,27 @@ from datetime import datetime, timedelta
 # 1. Configuração da página
 st.set_page_config(page_title="Buena Vista | Dash", layout="wide", page_icon="📈")
 
-# 2. Estilização Master (Clean & Breathing UI)
+# 2. Estilização Master (UI Profissional)
 st.markdown("""
     <style>
     .section-title { font-size: 24px; font-weight: 800; color: #ffffff; background-color: #1E88E5; padding: 10px 20px; border-radius: 10px; margin-top: 20px; margin-bottom: 15px; }
     .ticker-name { font-size: 26px !important; font-weight: 900; color: #4dabf7; margin-bottom: 5px;}
     .strategy-box { font-size: 13px !important; color: #e9ecef !important; background-color: #2b2f33; padding: 10px; border-radius: 8px; border-left: 5px solid #4dabf7; margin-bottom: 10px; min-height: 70px; }
+    
+    /* Alerta de Alavancagem - Alta Visibilidade */
+    .alavancado-badge { background-color: #ff4b4b; color: white; padding: 2px 8px; border-radius: 4px; font-size: 10px; font-weight: 900; text-transform: uppercase; margin-bottom: 10px; display: inline-block; }
+    
     .div-box { background-color: rgba(64, 192, 87, 0.1); padding: 8px; border-radius: 5px; margin-top: 10px; border-left: 3px solid #40c057;}
     .div-value { color: #40c057; font-size: 14px; font-weight: bold; }
     .div-yield { color: #aaa; font-size: 12px; }
     
-    /* Liquidez com margem inferior para respiro visual */
     .liquidez-bar { display: flex; justify-content: space-between; align-items: center; margin-top: 15px; margin-bottom: 15px; border-top: 1px solid #444; padding-top: 12px; }
     .liquidez-texto { font-size: 12px; color: #888; font-weight: 600; }
     .badge-low { background-color: rgba(255, 193, 7, 0.1); color: #ffc107; padding: 2px 8px; border-radius: 10px; font-size: 10px; border: 1px solid #ffc107; }
-    .stMetric { background-color: #1e2124; padding: 15px; border-radius: 10px; border: 1px solid #333; }
     </style>
     """, unsafe_allow_html=True)
 
-# --- FUNÇÕES AUXILIARES ---
+# --- FUNÇÕES ---
 def format_liq(valor):
     if valor >= 1_000_000: return f"R$ {valor/1_000_000:.1f}M"
     if valor >= 1_000: return f"R$ {valor/1_000:.0f}k"
@@ -48,75 +50,81 @@ def termometro_52s(min_val, max_val, atual):
 
 # 3. Definição do Portfólio
 tickers_dict = {
-    "🎯 Renda & Índices": ["SPYI11.SA", "QQQI11.SA", "IWMI11.SA", "GDIV11.SA", "QQQQ11.SA", "XSPI11.SA"],
+    "🎯 Renda & Índices": ["SPYI11.SA", "QQQI11.SA", "GDIV11.SA", "IWMI11.SA", "QQQQ11.SA", "XSPI11.SA"],
     "🌐 Cripto ativos": ["COIN11.SA", "ETHY11.SA", "XBCI11.SA", "GBTC11.SA"],
-    "🛡️ Proteção & Real": ["AURO11.SA", "PIPE11.SA", "CASA11.SA", "FIXX11.SA", "RICO11.SA"]
+    "🛡️ Proteção & Temáticos": ["AURO11.SA", "PIPE11.SA", "CASA11.SA", "FIXX11.SA", "RICO11.SA"]
 }
 all_tickers = [t for sub in tickers_dict.values() for t in sub]
+alavancados = ["XSPI11.SA", "XBCI11.SA"]
 
 descricoes = {
-    "SPYI11.SA": "S&P 500 + Covered Calls para renda mensal.", "QQQI11.SA": "Nasdaq-100 + Venda de opções.",
-    "COIN11.SA": "Ecossistema Cripto e Blockchain.", "IWMI11.SA": "Small Caps (Russell 2000) + Opções.",
-    "QQQQ11.SA": "Nasdaq High Beta (Alta Volatilidade).", "CASA11.SA": "REITs de qualidade (Imobiliário EUA).",
-    "FIXX11.SA": "Caixa em Dólar (T-Bills 1-3 meses).", "RICO11.SA": "Copia Grandes Bilionários.",
-    "GBTC11.SA": "Ouro Físico + Bitcoin.", "AURO11.SA": "Ouro Físico + Renda Mensal.",
-    "GDIV11.SA": "Ações globais sólidas e dividendos.", "ETHY11.SA": "Ethereum + Opções.",
-    "PIPE11.SA": "Infraestrutura de Energia (MLPs).", "XBCI11.SA": "Boosted Bitcoin (Yield).",
-    "XSPI11.SA": "Boosted S&P 500. ⚠️ ALAVANCADO"
+    "SPYI11.SA": "S&P 500 + Covered Calls para renda mensal estável.",
+    "QQQI11.SA": "Nasdaq-100 + Venda de opções (Foco Tech).",
+    "GDIV11.SA": "Ações globais de alta qualidade e baixa volatilidade.",
+    "COIN11.SA": "Ecossistema Cripto e Blockchain.",
+    "IWMI11.SA": "Small Caps americanas com estratégia de renda.",
+    "QQQQ11.SA": "Nasdaq High Beta (Máxima Volatilidade).",
+    "AURO11.SA": "Ouro Físico + Renda Mensal (Defesa Real).",
+    "PIPE11.SA": "Infraestrutura de Energia (MLPs).",
+    "CASA11.SA": "REITs americanos de qualidade.",
+    "FIXX11.SA": "Caixa em Dólar (T-Bills 1-3 meses).",
+    "RICO11.SA": "Estratégia dos Maiores Bilionários do Mundo.",
+    "GBTC11.SA": "Mix de Ouro com Ouro Digital (Bitcoin).",
+    "ETHY11.SA": "Ethereum + Opções.",
+    "XBCI11.SA": "Bitcoin Potencializado. Foco em Yield Agressivo.",
+    "XSPI11.SA": "S&P 500 Potencializado. Exposição Alavancada."
 }
 
-# --- REQUISIÇÃO ÚNICA ---
+# 4. Requisição Única
 @st.cache_data(ttl=600)
-def fetch_everything():
-    try:
-        return yf.download(all_tickers, period="1y", actions=True, group_by='ticker', threads=True)
-    except:
-        return None
+def fetch_data():
+    try: return yf.download(all_tickers, period="1y", actions=True, group_by='ticker', threads=True)
+    except: return None
 
 with st.spinner("Sincronizando mercado..."):
-    df_global = fetch_everything()
+    df_global = fetch_data()
 
-# 5. Sidebar - Calculadora de Rebalanceamento Histórico
+# 5. Sidebar - Calculadora Estratégica (Sem CASA11, com GDIV11)
 with st.sidebar:
-    st.header("⚖️ Estratégia Histórica")
-    st.caption("Foco: Crescimento (S&P/Nasdaq) + Proteção (Ouro/Real)")
+    st.header("⚖️ Estratégia Defensiva")
+    st.caption("Foco: Renda + Proteção (Ouro/Dividendos)")
     aporte_valor = st.number_input("💸 Novo Aporte (R$):", min_value=0.0, value=1000.0, step=100.0)
     
-    st.markdown("**Minhas Cotas Atuais:**")
+    st.markdown("**Minhas Cotas:**")
     q_spyi = st.number_input("SPYI11", 0)
     q_qqqi = st.number_input("QQQI11", 0)
     q_auro = st.number_input("AURO11", 0)
-    q_casa = st.number_input("CASA11", 0)
+    q_gdiv = st.number_input("GDIV11", 0)
     q_coin = st.number_input("COIN11", 0)
     
-    st.markdown("**Alvos Estratégicos (%):**")
+    st.markdown("**Alvos (%):**")
     c1, c2 = st.columns(2)
-    a_spyi = c1.number_input("% SPYI", 40)
-    a_qqqi = c2.number_input("% QQQI", 30)
-    a_auro = c1.number_input("% AURO", 10)
-    a_casa = c2.number_input("% CASA", 10)
+    a_spyi = c1.number_input("% SPYI", 35)
+    a_qqqi = c2.number_input("% QQQI", 25)
+    a_auro = c1.number_input("% AURO", 15)
+    a_gdiv = c2.number_input("% GDIV", 15)
     a_coin = c1.number_input("% COIN", 10)
     
     if st.button("🧮 Calcular Rebalanceamento", use_container_width=True):
-        if (a_spyi + a_qqqi + a_auro + a_casa + a_coin) != 100:
-            st.error("A soma deve ser 100%.")
+        if (a_spyi + a_qqqi + a_auro + a_gdiv + a_coin) != 100:
+            st.error("Soma deve ser 100%.")
         elif df_global is not None:
             try:
                 precos = {
                     'SPYI11': df_global['SPYI11.SA']['Close'].dropna().iloc[-1],
                     'QQQI11': df_global['QQQI11.SA']['Close'].dropna().iloc[-1],
                     'AURO11': df_global['AURO11.SA']['Close'].dropna().iloc[-1],
-                    'CASA11': df_global['CASA11.SA']['Close'].dropna().iloc[-1],
+                    'GDIV11': df_global['GDIV11.SA']['Close'].dropna().iloc[-1],
                     'COIN11': df_global['COIN11.SA']['Close'].dropna().iloc[-1]
                 }
-                v_at = {'SPYI11': q_spyi*precos['SPYI11'], 'QQQI11': q_qqqi*precos['QQQI11'], 'AURO11': q_auro*precos['AURO11'], 'CASA11': q_casa*precos['CASA11'], 'COIN11': q_coin*precos['COIN11']}
+                v_at = {'SPYI11': q_spyi*precos['SPYI11'], 'QQQI11': q_qqqi*precos['QQQI11'], 'AURO11': q_auro*precos['AURO11'], 'GDIV11': q_gdiv*precos['GDIV11'], 'COIN11': q_coin*precos['COIN11']}
                 pat_fut = sum(v_at.values()) + aporte_valor
-                alvos = {'SPYI11': a_spyi/100, 'QQQI11': a_qqqi/100, 'AURO11': a_auro/100, 'CASA11': a_casa/100, 'COIN11': a_coin/100}
+                alvos = {'SPYI11': a_spyi/100, 'QQQI11': a_qqqi/100, 'AURO11': a_auro/100, 'GDIV11': a_gdiv/100, 'COIN11': a_coin/100}
                 deficits = {at: max(0, (pat_fut * alvos[at]) - v_at[at]) for at in alvos}
                 soma_def = sum(deficits.values())
                 
                 st.markdown("---")
-                st.write("🛒 **Sugestão de Aporte:**")
+                st.write("🛒 **Sugestão de Compra:**")
                 for at, defic in deficits.items():
                     if defic > 0 and soma_def > 0:
                         qtd = int((aporte_valor * (defic/soma_def)) // precos[at])
@@ -127,7 +135,7 @@ with st.sidebar:
         st.cache_data.clear()
         st.rerun()
 
-# 6. Dashboard Principal
+# 6. Painel Principal
 hora_br = (datetime.utcnow() - timedelta(hours=3)).strftime('%H:%M:%S')
 st.title("📈 Monitor Buena Vista ETFs")
 st.caption(f"Sincronizado BRT: {hora_br} | ⚠️ Delay B3: ~15min")
@@ -141,26 +149,20 @@ if df_global is not None and not df_global.empty:
                 with st.container(border=True):
                     try:
                         d_at = df_global[t].dropna(subset=['Close'])
-                        d_at = d_at[d_at['Close'] > 0]
-                        
                         if not d_at.empty:
                             p_at = float(d_at['Close'].iloc[-1])
                             p_ant = float(d_at['Close'].iloc[-2]) if len(d_at) > 1 else p_at
                             var = ((p_at - p_ant) / p_ant) * 100
-                            
-                            # Filtro Mínima/Máxima
                             l_v = d_at[d_at['Low'] > 0]['Low']
                             min_52, max_52 = float(l_v.min()), float(d_at['High'].max())
-                            
-                            # Renda
                             d_p = d_at[d_at['Dividends'] > 0]['Dividends']
-                            u_d = float(d_p.iloc[-1]) if not d_p.empty else 0.0
-                            y_m = (u_d / p_at) * 100 if p_at > 0 else 0.0
-                            
-                            # Liquidez Média
+                            u_d, y_m = (float(d_p.iloc[-1]), (float(d_p.iloc[-1])/p_at)*100) if not d_p.empty else (0.0, 0.0)
                             l_f = p_at * d_at['Volume'].tail(5).mean()
                             
-                            st.markdown(f"<div class='ticker-name'>{t.replace('.SA','')}</div>", unsafe_allow_html=True)
+                            # Alerta de Alavancagem
+                            badge_alavancado = "<div class='alavancado-badge'>⚠️ ALAVANCADO</div>" if t in alavancados else ""
+                            
+                            st.markdown(f"{badge_alavancado}<div class='ticker-name'>{t.replace('.SA','')}</div>", unsafe_allow_html=True)
                             st.markdown(f"<div class='strategy-box'>{descricoes[t]}</div>", unsafe_allow_html=True)
                             st.metric("Cotação", f"R$ {p_at:.2f}", f"{var:.2f}%")
                             
@@ -168,11 +170,8 @@ if df_global is not None and not df_global.empty:
                                 st.markdown(f"<div class='div-box'><span class='div-value'>💰 R$ {u_d:.2f}</span><br><span class='div-yield'>Yield Mensal: {y_m:.2f}%</span></div>", unsafe_allow_html=True)
                             
                             st.markdown(termometro_52s(min_52, max_52, p_at), unsafe_allow_html=True)
-                            
-                            # Barra de Liquidez com Respiro
-                            badge = "<span class='badge-low'>⚠️ Restrita</span>" if l_f < 100000 else ""
-                            st.markdown(f"<div class='liquidez-bar'><span class='liquidez-texto'>💧 Liq (5d): {format_liq(l_f)}</span>{badge}</div>", unsafe_allow_html=True)
+                            badge_liq = "<span class='badge-low'>⚠️ Restrita</span>" if l_f < 100000 else ""
+                            st.markdown(f"<div class='liquidez-bar'><span class='liquidez-texto'>💧 Liq (5d): {format_liq(l_f)}</span>{badge_liq}</div>", unsafe_allow_html=True)
                         else: raise ValueError
                     except: st.error(f"Erro em {t}")
-else:
-    st.error("Falha na conexão.")
+else: st.error("Falha na conexão.")
