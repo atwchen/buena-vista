@@ -16,17 +16,15 @@ st.markdown("""
     .div-box { background-color: rgba(64, 192, 87, 0.1); padding: 8px; border-radius: 5px; margin-top: 10px; border-left: 3px solid #40c057;}
     .div-value { color: #40c057; font-size: 14px; font-weight: bold; }
     .div-yield { color: #aaa; font-size: 12px; }
-    .stMetric { background-color: #1e2124; padding: 15px; border-radius: 10px; border: 1px solid #333; }
+    .liquidez-label { font-size: 11px; color: #888; font-weight: bold; margin-top: 10px; }
     </style>
     """, unsafe_allow_html=True)
 
-# --- FUNÇÃO: TERMÔMETRO VISUAL COM ESPAÇAMENTO ---
 def termometro_52s(min_val, max_val, atual):
     pos = ((atual - min_val) / (max_val - min_val)) * 100 if max_val != min_val else 50
     pos = max(0, min(100, pos))
-    # Aumentei o margin-bottom para 20px para descolar do final do card
     return f"""
-    <div style="margin-top: 15px; margin-bottom: 20px; padding: 0 5px;">
+    <div style="margin-top: 15px; margin-bottom: 25px; padding: 0 5px;">
         <div style="display: flex; justify-content: space-between; font-size: 11px; color: #888; margin-bottom: 4px;">
             <span>Mín: R$ {min_val:.2f}</span>
             <span>Máx: R$ {max_val:.2f}</span>
@@ -50,10 +48,10 @@ descricoes = {
     "COIN11.SA": "Ecossistema Cripto e Blockchain.", "IWMI11.SA": "Small Caps (Russell 2000) + Opções.",
     "QQQQ11.SA": "Nasdaq High Beta (Alta Volatilidade).", "CASA11.SA": "REITs de qualidade (Imobiliário EUA).",
     "FIXX11.SA": "Caixa em Dólar (T-Bills 1-3 meses).", "RICO11.SA": "Copia Grandes Bilionários.",
-    "GBTC11.SA": "Hashdex Gold + Bitcoin.", "AURO11.SA": "Ouro Físico + Renda Mensal.",
+    "GBTC11.SA": "Ouro Físico + Bitcoin.", "AURO11.SA": "Ouro Físico + Renda Mensal.",
     "GDIV11.SA": "Ações globais sólidas e dividendos.", "ETHY11.SA": "Ethereum + Opções.",
-    "PIPE11.SA": "Infraestrutura de Energia (MLPs).", "XBCI11.SA": "Boosted Bitcoin (Yield).",
-    "XSPI11.SA": "Boosted S&P 500. ⚠️ ALAVANCADO"
+    "PIPE11.SA": "Infraestrutura de Energia (MLPs).", "XBCI11.SA": "Bitcoin Alavancado (Yield).",
+    "XSPI11.SA": "S&P 500 Alavancado. ⚠️ ALAVANCADO"
 }
 
 # --- REQUISIÇÃO ÚNICA DE DADOS ---
@@ -65,34 +63,81 @@ def fetch_everything_single_batch():
     except:
         return None
 
-with st.spinner("Sincronizando com a B3 em lote único..."):
+with st.spinner("Sincronizando mercado..."):
     df_global = fetch_everything_single_batch()
 
-# 5. Sidebar
+# 5. Sidebar - Calculadora de Rebalanceamento
 with st.sidebar:
-    st.header("⚖️ Calculadora")
-    aporte = st.number_input("Aporte (R$):", min_value=0.0, value=1000.0)
-    st.markdown("**Cotas Atuais:**")
+    st.header("⚖️ Calculadora Inteligente")
+    aporte_valor = st.number_input("💸 Novo Aporte (R$):", min_value=0.0, value=1000.0, step=100.0)
+    
+    st.markdown("**Cotas Atuais (Preencha):**")
     q_spyi = st.number_input("SPYI11", 0)
     q_qqqi = st.number_input("QQQI11", 0)
     q_ethy = st.number_input("ETHY11", 0)
     q_coin = st.number_input("COIN11", 0)
     
-    st.markdown("**Alvos (%):**")
+    st.markdown("**Alvos Desejados (%):**")
     col1, col2 = st.columns(2)
     a_spyi = col1.number_input("% SPYI", 50)
     a_qqqi = col2.number_input("% QQQI", 30)
     a_ethy = col1.number_input("% ETHY", 10)
     a_coin = col2.number_input("% COIN", 10)
     
-    if st.button("🚀 Forçar Atualização"):
+    if st.button("🧮 Calcular Onde Aportar"):
+        if (a_spyi + a_qqqi + a_ethy + a_coin) != 100:
+            st.error("A soma dos alvos deve ser 100%.")
+        elif df_global is not None:
+            try:
+                # Pegando preços atuais
+                precos = {
+                    'SPYI11': df_global['SPYI11.SA']['Close'].dropna().iloc[-1],
+                    'QQQI11': df_global['QQQI11.SA']['Close'].dropna().iloc[-1],
+                    'ETHY11': df_global['ETHY11.SA']['Close'].dropna().iloc[-1],
+                    'COIN11': df_global['COIN11.SA']['Close'].dropna().iloc[-1]
+                }
+                
+                # Valores atuais em R$
+                valores_atuais = {
+                    'SPYI11': q_spyi * precos['SPYI11'],
+                    'QQQI11': q_qqqi * precos['QQQI11'],
+                    'ETHY11': q_ethy * precos['ETHY11'],
+                    'COIN11': q_coin * precos['COIN11']
+                }
+                
+                pat_total_atual = sum(valores_atuais.values())
+                pat_futuro_alvo = pat_total_atual + aporte_valor
+                
+                # Objetivos em R$
+                alvos_pct = {'SPYI11': a_spyi/100, 'QQQI11': a_qqqi/100, 'ETHY11': a_ethy/100, 'COIN11': a_coin/100}
+                
+                # Cálculo do Déficit (quanto falta para o ideal)
+                deficits = {at: max(0, (pat_futuro_alvo * alvos_pct[at]) - valores_atuais[at]) for at in alvos_pct}
+                soma_deficits = sum(deficits.values())
+                
+                st.markdown("---")
+                st.write("🛒 **Sugestão de Compra:**")
+                if soma_deficits > 0:
+                    for at, deficit in deficits.items():
+                        if deficit > 0:
+                            fatia_aporte = aporte_valor * (deficit / soma_deficits)
+                            qtd_compra = int(fatia_aporte // precos[at])
+                            if qtd_compra > 0:
+                                st.success(f"**{at}:** Comprar {qtd_compra} cotas")
+                else:
+                    st.info("Sua carteira já está equilibrada.")
+            except:
+                st.error("Erro ao processar dados. Tente atualizar.")
+
+    st.markdown("---")
+    if st.button("🚀 Limpar Cache e Forçar Atualização"):
         st.cache_data.clear()
         st.rerun()
 
 # 6. Dashboard Principal
 hora_br = (datetime.utcnow() - timedelta(hours=3)).strftime('%H:%M:%S')
 st.title("📈 Monitor Buena Vista ETFs")
-st.caption(f"Sincronizado BRT: {hora_br} | ⚠️ Delay padrão de ~15min em relação à B3")
+st.caption(f"Sincronizado BRT: {hora_br} | ⚠️ Delay padrão B3: ~15min")
 
 if df_global is not None and not df_global.empty:
     for cat, ativos in tickers_dict.items():
@@ -103,26 +148,27 @@ if df_global is not None and not df_global.empty:
                 with st.container(border=True):
                     try:
                         d_ativo = df_global[t].dropna(subset=['Close'])
-                        
                         if not d_ativo.empty:
                             p_atual = float(d_ativo['Close'].iloc[-1])
                             p_ant = float(d_ativo['Close'].iloc[-2]) if len(d_ativo) > 1 else p_atual
                             var = ((p_atual - p_ant) / p_ant) * 100
                             
-                            min_52 = float(d_ativo['Low'].min())
-                            max_52 = float(d_ativo['High'].max())
+                            min_52, max_52 = float(d_ativo['Low'].min()), float(d_ativo['High'].max())
                             
-                            # Filtra a coluna de dividendos (actions=True do yf.download)
+                            # Dividendos
                             divs_pagos = d_ativo[d_ativo['Dividends'] > 0]['Dividends']
                             ultimo_div = float(divs_pagos.iloc[-1]) if not divs_pagos.empty else 0.0
                             yield_m = (ultimo_div / p_atual) * 100 if p_atual > 0 else 0.0
+                            
+                            # LIQUIDEZ: Volume financeiro diário estimado
+                            vol_quant = d_ativo['Volume'].iloc[-1]
+                            liquidez_fin = p_atual * vol_quant
                             
                             st.markdown(f"<div class='ticker-name'>{t.replace('.SA','')}</div>", unsafe_allow_html=True)
                             st.markdown(f"<div class='strategy-box'>{descricoes[t]}</div>", unsafe_allow_html=True)
                             
                             st.metric("Cotação", f"R$ {p_atual:.2f}", f"{var:.2f}%")
                             
-                            # Proventos
                             if ultimo_div > 0:
                                 st.markdown(f"""
                                 <div class='div-box'>
@@ -130,20 +176,17 @@ if df_global is not None and not df_global.empty:
                                     <span class='div-yield'>Yield Mensal: {yield_m:.2f}%</span>
                                 </div>
                                 """, unsafe_allow_html=True)
-                            else:
-                                st.markdown("<div class='div-box'><span class='div-yield'>Sem proventos listados no ano.</span></div>", unsafe_allow_html=True)
                             
-                            # Termômetro com o novo espaçamento
                             st.markdown(termometro_52s(min_52, max_52, p_atual), unsafe_allow_html=True)
+                            
+                            # Rodapé de Liquidez
+                            st.markdown(f"<div class='liquidez-label'>Liquidez Diária: R$ {liquidez_fin:,.2f}</div>".replace(",", "X").replace(".", ",").replace("X", "."), unsafe_allow_html=True)
+                            if liquidez_fin < 500000:
+                                st.warning("⚠️ Liquidez Restrita: Cuidado em ordens grandes.")
                         else:
                             raise ValueError
                     except Exception as e:
                         st.markdown(f"<div class='ticker-name'>{t.replace('.SA','')}</div>", unsafe_allow_html=True)
-                        st.error("Sem sinal da B3 no momento.")
+                        st.error("Dados indisponíveis no momento.")
 else:
-    st.error("⚠️ Yahoo Finance bloqueou a conexão. Aguarde alguns minutos.")
-
-# Auto-refresh
-if st.sidebar.toggle("🔄 Auto-Refresh (10 min)", value=False):
-    time.sleep(600)
-    st.rerun()
+    st.error("⚠️ Falha na conexão com o Yahoo Finance.")
