@@ -89,7 +89,6 @@ with st.sidebar:
             st.error("A soma dos alvos deve ser 100%.")
         elif df_global is not None:
             try:
-                # Pegando preços atuais
                 precos = {
                     'SPYI11': df_global['SPYI11.SA']['Close'].dropna().iloc[-1],
                     'QQQI11': df_global['QQQI11.SA']['Close'].dropna().iloc[-1],
@@ -97,7 +96,6 @@ with st.sidebar:
                     'COIN11': df_global['COIN11.SA']['Close'].dropna().iloc[-1]
                 }
                 
-                # Valores atuais em R$
                 valores_atuais = {
                     'SPYI11': q_spyi * precos['SPYI11'],
                     'QQQI11': q_qqqi * precos['QQQI11'],
@@ -108,10 +106,7 @@ with st.sidebar:
                 pat_total_atual = sum(valores_atuais.values())
                 pat_futuro_alvo = pat_total_atual + aporte_valor
                 
-                # Objetivos em R$
                 alvos_pct = {'SPYI11': a_spyi/100, 'QQQI11': a_qqqi/100, 'ETHY11': a_ethy/100, 'COIN11': a_coin/100}
-                
-                # Cálculo do Déficit (quanto falta para o ideal)
                 deficits = {at: max(0, (pat_futuro_alvo * alvos_pct[at]) - valores_atuais[at]) for at in alvos_pct}
                 soma_deficits = sum(deficits.values())
                 
@@ -147,22 +142,27 @@ if df_global is not None and not df_global.empty:
             with cols[idx % 3]:
                 with st.container(border=True):
                     try:
+                        # Extrai dados e tira preços zerados que o Yahoo manda por engano
                         d_ativo = df_global[t].dropna(subset=['Close'])
+                        d_ativo = d_ativo[d_ativo['Close'] > 0]
+                        
                         if not d_ativo.empty:
                             p_atual = float(d_ativo['Close'].iloc[-1])
                             p_ant = float(d_ativo['Close'].iloc[-2]) if len(d_ativo) > 1 else p_atual
                             var = ((p_atual - p_ant) / p_ant) * 100
                             
-                            min_52, max_52 = float(d_ativo['Low'].min()), float(d_ativo['High'].max())
+                            # FILTRO SALVA-VIDAS: Ignora dias com mínima igual a 0
+                            lows_validos = d_ativo[d_ativo['Low'] > 0]['Low']
+                            min_52 = float(lows_validos.min()) if not lows_validos.empty else p_atual
+                            max_52 = float(d_ativo['High'].max())
                             
-                            # Dividendos
                             divs_pagos = d_ativo[d_ativo['Dividends'] > 0]['Dividends']
                             ultimo_div = float(divs_pagos.iloc[-1]) if not divs_pagos.empty else 0.0
                             yield_m = (ultimo_div / p_atual) * 100 if p_atual > 0 else 0.0
                             
-                            # LIQUIDEZ: Volume financeiro diário estimado
-                            vol_quant = d_ativo['Volume'].iloc[-1]
-                            liquidez_fin = p_atual * vol_quant
+                            # LIQUIDEZ MÉDIA DE 5 DIAS: Resolve o bug do "Volume 0 hoje"
+                            vol_medio = d_ativo['Volume'].tail(5).mean()
+                            liquidez_fin = p_atual * vol_medio
                             
                             st.markdown(f"<div class='ticker-name'>{t.replace('.SA','')}</div>", unsafe_allow_html=True)
                             st.markdown(f"<div class='strategy-box'>{descricoes[t]}</div>", unsafe_allow_html=True)
@@ -179,8 +179,7 @@ if df_global is not None and not df_global.empty:
                             
                             st.markdown(termometro_52s(min_52, max_52, p_atual), unsafe_allow_html=True)
                             
-                            # Rodapé de Liquidez
-                            st.markdown(f"<div class='liquidez-label'>Liquidez Diária: R$ {liquidez_fin:,.2f}</div>".replace(",", "X").replace(".", ",").replace("X", "."), unsafe_allow_html=True)
+                            st.markdown(f"<div class='liquidez-label'>Liquidez Média (5d): R$ {liquidez_fin:,.2f}</div>".replace(",", "X").replace(".", ",").replace("X", "."), unsafe_allow_html=True)
                             if liquidez_fin < 500000:
                                 st.warning("⚠️ Liquidez Restrita: Cuidado em ordens grandes.")
                         else:
